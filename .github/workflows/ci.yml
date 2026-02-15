@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            gcc make libddcutil-dev gettext dpkg-dev
+
+      - name: Run checks
+        run: make verify
+
+      - name: Build Debian package
+        run: make package
+
+      - name: Upload package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: easy-brightness-deb
+          path: dist/*.deb

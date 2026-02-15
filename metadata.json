@@ -1,0 +1,12 @@
+{
+    "uuid": "easy-brightness@iridiumus",
+    "name": "Easy Brightness",
+    "description": "DDC/CI brightness and blue gain control for external monitors",
+    "comments": "Switch instantly between Day, Night, and Custom monitor profiles from the Cinnamon panel.",
+    "website": "https://github.com/iridiumus/easy-brightness",
+    "version": "1.0.0",
+    "contributors": "iridiumus - Author",
+    "author": "iridiumus",
+    "icon": "display-brightness-symbolic",
+    "max-instances": 1
+}

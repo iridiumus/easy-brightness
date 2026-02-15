@@ -1,0 +1,79 @@
+{
+    "layout": {
+        "type": "layout",
+        "pages": ["page-settings"],
+        "page-settings": {
+            "type": "page",
+            "title": "Settings",
+            "sections": ["section-day", "section-night", "section-advanced"]
+        },
+        "section-day": {
+            "type": "section",
+            "title": "Day",
+            "keys": ["day-brightness", "day-blue"]
+        },
+        "section-night": {
+            "type": "section",
+            "title": "Night",
+            "keys": ["night-brightness", "night-blue"]
+        },
+        "section-advanced": {
+            "type": "section",
+            "title": "Advanced",
+            "keys": ["mode-debounce"]
+        }
+    },
+    "day-brightness": {
+        "type": "scale",
+        "default": 100,
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "description": "Brightness"
+    },
+    "day-blue": {
+        "type": "scale",
+        "default": 100,
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "description": "Blue"
+    },
+    "night-brightness": {
+        "type": "scale",
+        "default": 0,
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "description": "Brightness"
+    },
+    "night-blue": {
+        "type": "scale",
+        "default": 0,
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "description": "Blue"
+    },
+    "mode-debounce": {
+        "type": "spinbutton",
+        "default": 750,
+        "min": 100,
+        "max": 3000,
+        "step": 50,
+        "units": "ms",
+        "description": "Delay before applying mode switch"
+    },
+    "current-mode": {
+        "type": "generic",
+        "default": "day"
+    },
+    "custom-brightness": {
+        "type": "generic",
+        "default": 50
+    },
+    "custom-blue": {
+        "type": "generic",
+        "default": 50
+    }
+}
