@@ -1,0 +1,88 @@
+# Easy Brightness translation template.
+# Copyright (C) 2026
+# This file is distributed under the same license as easy-brightness.
+msgid ""
+msgstr ""
+"Project-Id-Version: easy-brightness@iridiumus 1.0.0\n"
+"Report-Msgid-Bugs-To: https://github.com/iridiumus/easy-brightness/issues\n"
+"POT-Creation-Date: 2026-02-15 00:00+0000\n"
+"PO-Revision-Date: 2026-02-15 00:00+0000\n"
+"Last-Translator: Automatically generated\n"
+"Language-Team: none\n"
+"Language: fr\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n > 1);\n"
+
+#. metadata.json->name
+msgid "Easy Brightness"
+msgstr ""
+
+#. metadata.json->description
+msgid "DDC/CI brightness and blue gain control for external monitors"
+msgstr ""
+
+#. metadata.json->comments
+msgid ""
+"Switch instantly between Day, Night, and Custom monitor profiles from the "
+"Cinnamon panel."
+msgstr ""
+
+#. metadata.json->contributors
+msgid "iridiumus - Author"
+msgstr ""
+
+#. settings-schema.json->layout->page-settings->title
+msgid "Settings"
+msgstr ""
+
+#. settings-schema.json->layout->section-day->title
+#: applet.js
+msgid "Day"
+msgstr ""
+
+#. settings-schema.json->layout->section-night->title
+#: applet.js
+msgid "Night"
+msgstr ""
+
+#. settings-schema.json->layout->section-advanced->title
+msgid "Advanced"
+msgstr ""
+
+#. settings-schema.json->day-brightness->description
+#. settings-schema.json->night-brightness->description
+#: applet.js
+msgid "Brightness"
+msgstr ""
+
+#. settings-schema.json->day-blue->description
+#. settings-schema.json->night-blue->description
+#: applet.js
+msgid "Blue"
+msgstr ""
+
+#. settings-schema.json->mode-debounce->description
+msgid "Delay before applying mode switch"
+msgstr ""
+
+#: applet.js
+msgid "%s: ?%%"
+msgstr ""
+
+#: applet.js
+msgid "%s: %d%%"
+msgstr ""
+
+#: applet.js
+msgid "Applying settings..."
+msgstr ""
+
+#: applet.js
+msgid "Custom"
+msgstr ""
+
+#: applet.js
+msgid "%s | Brightness: %d%% | Blue: %d%%"
+msgstr ""
