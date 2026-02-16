@@ -70,7 +70,7 @@ Architecture: $arch
 Maintainer: $MAINTAINER
 Depends: $depends
 Homepage: $HOMEPAGE
-Description: Easy brightness and blue gain control applet for Cinnamon
+Description: Easy brightness, contrast, and blue gain control applet for Cinnamon
  Switch between day, night and custom display profiles from the Cinnamon panel.
  The applet controls external monitors via DDC/CI using libddcutil.
 CONTROL

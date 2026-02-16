@@ -10,12 +10,12 @@
         "section-day": {
             "type": "section",
             "title": "Day",
-            "keys": ["day-brightness", "day-blue"]
+            "keys": ["day-brightness", "day-contrast", "day-blue"]
         },
         "section-night": {
             "type": "section",
             "title": "Night",
-            "keys": ["night-brightness", "night-blue"]
+            "keys": ["night-brightness", "night-contrast", "night-blue"]
         },
         "section-advanced": {
             "type": "section",
@@ -30,6 +30,14 @@
         "max": 100,
         "step": 1,
         "description": "Brightness"
+    },
+    "day-contrast": {
+        "type": "scale",
+        "default": 50,
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "description": "Contrast"
     },
     "day-blue": {
         "type": "scale",
@@ -46,6 +54,14 @@
         "max": 100,
         "step": 1,
         "description": "Brightness"
+    },
+    "night-contrast": {
+        "type": "scale",
+        "default": 50,
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "description": "Contrast"
     },
     "night-blue": {
         "type": "scale",
@@ -69,6 +85,10 @@
         "default": "day"
     },
     "custom-brightness": {
+        "type": "generic",
+        "default": 50
+    },
+    "custom-contrast": {
         "type": "generic",
         "default": 50
     },

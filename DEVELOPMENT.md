@@ -38,4 +38,5 @@ make clean
 ## Hardware Notes
 
 - DDC/CI must be enabled in monitor settings.
-- Some monitors may need repeated writes; retries are handled in applet logic.
+- Some monitors may not expose contrast control (`VCP 0x12`); apply will report per-display failed stage.
+- Some monitors may need repeated writes; retries are handled by applet state-machine stages.

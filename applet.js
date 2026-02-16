@@ -20,6 +20,14 @@ const ICON_BUSY = "content-loading-symbolic";
 
 const MAX_RETRIES = 5;
 const RETRY_DELAY_MS = 2000;
+const DISPLAY_FSM_STATE = {
+    INIT: "init",
+    SET_BRIGHTNESS: "set_brightness",
+    SET_CONTRAST: "set_contrast",
+    SET_BLUE: "set_blue",
+    DONE: "done",
+    FAILED: "failed"
+};
 
 function _(str) {
     let translated = Gettext.dgettext(UUID, str);
@@ -72,15 +80,19 @@ class EasyBrightnessApplet extends Applet.IconApplet {
 
         this._helperPath = metadata.path + "/easy-brightness-helper";
         this._busy = false;
+        this._applyRunId = 0;
 
         // Settings
         this.settings = new Settings.AppletSettings(this, UUID, instanceId);
         this.settings.bind("day-brightness", "dayBrightness");
+        this.settings.bind("day-contrast", "dayContrast");
         this.settings.bind("day-blue", "dayBlue");
         this.settings.bind("night-brightness", "nightBrightness");
+        this.settings.bind("night-contrast", "nightContrast");
         this.settings.bind("night-blue", "nightBlue");
         this.settings.bind("current-mode", "currentMode");
         this.settings.bind("custom-brightness", "customBrightness");
+        this.settings.bind("custom-contrast", "customContrast");
         this.settings.bind("custom-blue", "customBlue");
         this.settings.bind("mode-debounce", "modeDebounce");
 
@@ -88,6 +100,10 @@ class EasyBrightnessApplet extends Applet.IconApplet {
         this._brightnessSlider = new ControlSlider(
             "display-brightness-symbolic", _("Brightness"),
             (pct) => this._onCustomSliderChanged("brightness", pct)
+        );
+        this._contrastSlider = new ControlSlider(
+            "preferences-desktop-display-symbolic", _("Contrast"),
+            (pct) => this._onCustomSliderChanged("contrast", pct)
         );
         this._blueSlider = new ControlSlider(
             "color-select-symbolic", _("Blue"),
@@ -98,13 +114,18 @@ class EasyBrightnessApplet extends Applet.IconApplet {
         if (savedBrightness === undefined || savedBrightness === null) savedBrightness = 50;
         this._brightnessSlider.setValue(savedBrightness / 100.0);
 
+        let savedContrast = this.customContrast;
+        if (savedContrast === undefined || savedContrast === null) savedContrast = 50;
+        this._contrastSlider.setValue(savedContrast / 100.0);
+
         let savedBlue = this.customBlue;
         if (savedBlue === undefined || savedBlue === null) savedBlue = 50;
         this._blueSlider.setValue(savedBlue / 100.0);
 
         this._applet_context_menu.addMenuItem(this._brightnessSlider, 0);
-        this._applet_context_menu.addMenuItem(this._blueSlider, 1);
-        this._applet_context_menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem(), 2);
+        this._applet_context_menu.addMenuItem(this._contrastSlider, 1);
+        this._applet_context_menu.addMenuItem(this._blueSlider, 2);
+        this._applet_context_menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem(), 3);
 
         // Apply saved mode on startup
         this._updateIcon();
@@ -149,6 +170,7 @@ class EasyBrightnessApplet extends Applet.IconApplet {
     }
 
     on_applet_removed_from_panel() {
+        this._applyRunId += 1;
         if (this._modeTimeoutId) {
             Mainloop.source_remove(this._modeTimeoutId);
             this._modeTimeoutId = 0;
@@ -157,6 +179,7 @@ class EasyBrightnessApplet extends Applet.IconApplet {
             Mainloop.source_remove(this._retryTimeoutId);
             this._retryTimeoutId = 0;
         }
+        this._busy = false;
     }
 
     _onCustomSliderChanged(which, pct) {
@@ -164,6 +187,8 @@ class EasyBrightnessApplet extends Applet.IconApplet {
 
         if (which === "brightness") {
             this.customBrightness = pct;
+        } else if (which === "contrast") {
+            this.customContrast = pct;
         } else {
             this.customBlue = pct;
         }
@@ -174,49 +199,219 @@ class EasyBrightnessApplet extends Applet.IconApplet {
 
     _getModeValues() {
         if (this.currentMode === "night") {
-            return [this.nightBrightness, this.nightBlue];
+            return [this.nightBrightness, this.nightContrast, this.nightBlue];
         } else if (this.currentMode === "custom") {
-            return [this.customBrightness, this.customBlue];
+            return [this.customBrightness, this.customContrast, this.customBlue];
         }
-        return [this.dayBrightness, this.dayBlue];
+        return [this.dayBrightness, this.dayContrast, this.dayBlue];
     }
 
     _applyMode() {
-        let [brightness, blue] = this._getModeValues();
+        if (this._busy) return;
+
+        let [brightness, contrast, blue] = this._getModeValues();
+        let targets = { brightness, contrast, blue };
+        let runId = ++this._applyRunId;
 
         this._busy = true;
         this.set_applet_icon_symbolic_name(ICON_BUSY);
         this.set_applet_tooltip(_("Applying settings..."));
 
-        this._applyWithRetry("set", brightness, 0, () => {
-            this._applyWithRetry("set-blue", blue, 0, () => {
-                this._busy = false;
-                this._updateIcon();
-                this._updateTooltip();
-            });
+        if (this._retryTimeoutId) {
+            Mainloop.source_remove(this._retryTimeoutId);
+            this._retryTimeoutId = 0;
+        }
+
+        this._applyTargetsWithStateMachine(runId, targets, (allOk) => {
+            if (runId !== this._applyRunId) return;
+            if (!allOk) {
+                global.logError("easy-brightness: apply state machine finished with failures");
+            }
+            this._busy = false;
+            this._updateIcon();
+            this._updateTooltip();
         });
     }
 
-    _applyWithRetry(command, target, attempt, onDone) {
-        this._runHelper([command, String(target)], (output) => {
-            let allOk = false;
-            if (output) {
-                try {
-                    let results = JSON.parse(output);
-                    allOk = results.every(r => r.ok);
-                } catch (e) {}
+    _applyTargetsWithStateMachine(runId, targets, onDone) {
+        this._runHelperJson(["detect"], (displays) => {
+            if (runId !== this._applyRunId) return;
+
+            if (!Array.isArray(displays)) {
+                onDone(false);
+                return;
             }
 
-            if (allOk) {
-                onDone();
-            } else if (attempt + 1 < MAX_RETRIES) {
-                this._retryTimeoutId = Mainloop.timeout_add(RETRY_DELAY_MS, () => {
-                    this._retryTimeoutId = 0;
-                    this._applyWithRetry(command, target, attempt + 1, onDone);
-                    return GLib.SOURCE_REMOVE;
+            if (displays.length === 0) {
+                onDone(true);
+                return;
+            }
+
+            let index = 0;
+            let allOk = true;
+
+            let runNext = () => {
+                if (runId !== this._applyRunId) return;
+                if (index >= displays.length) {
+                    onDone(allOk);
+                    return;
+                }
+
+                this._runDisplayStateMachine(runId, displays[index], targets, (result) => {
+                    if (runId !== this._applyRunId) return;
+                    if (!result.ok) {
+                        allOk = false;
+                        global.logError("easy-brightness: display apply failed: " + JSON.stringify(result));
+                    }
+                    index += 1;
+                    runNext();
                 });
-            } else {
-                onDone();
+            };
+
+            runNext();
+        });
+    }
+
+    _runDisplayStateMachine(runId, display, targets, onDone) {
+        let bus = Number(display.bus);
+        let serial = display && display.serial ? String(display.serial) : "";
+        let result = {
+            bus,
+            serial,
+            ok: false,
+            state: DISPLAY_FSM_STATE.INIT,
+            failed_step: "",
+            state_trace: "",
+            brightness: this._makeActionResult(targets.brightness),
+            contrast: this._makeActionResult(targets.contrast),
+            blue: this._makeActionResult(targets.blue)
+        };
+
+        this._appendStateTrace(result, DISPLAY_FSM_STATE.INIT);
+
+        let stages = [
+            {
+                state: DISPLAY_FSM_STATE.SET_BRIGHTNESS,
+                command: "set-bus",
+                field: "brightness",
+                target: targets.brightness
+            },
+            {
+                state: DISPLAY_FSM_STATE.SET_CONTRAST,
+                command: "set-contrast-bus",
+                field: "contrast",
+                target: targets.contrast
+            },
+            {
+                state: DISPLAY_FSM_STATE.SET_BLUE,
+                command: "set-blue-bus",
+                field: "blue",
+                target: targets.blue
+            }
+        ];
+
+        let stageIndex = 0;
+        let runStage = () => {
+            if (runId !== this._applyRunId) return;
+
+            if (stageIndex >= stages.length) {
+                result.state = DISPLAY_FSM_STATE.DONE;
+                result.ok = true;
+                this._appendStateTrace(result, DISPLAY_FSM_STATE.DONE);
+                onDone(result);
+                return;
+            }
+
+            let stage = stages[stageIndex];
+            result.state = stage.state;
+            this._appendStateTrace(result, stage.state);
+
+            this._runStageWithRetry(
+                runId, bus, stage.command, stage.field, stage.target, result[stage.field],
+                (ok) => {
+                    if (runId !== this._applyRunId) return;
+                    if (!ok) {
+                        result.state = DISPLAY_FSM_STATE.FAILED;
+                        result.failed_step = stage.field;
+                        this._appendStateTrace(result, DISPLAY_FSM_STATE.FAILED);
+                        onDone(result);
+                        return;
+                    }
+                    stageIndex += 1;
+                    runStage();
+                }
+            );
+        };
+
+        runStage();
+    }
+
+    _makeActionResult(target) {
+        return {
+            target,
+            value: -1,
+            attempts: 0,
+            ok: false
+        };
+    }
+
+    _appendStateTrace(result, state) {
+        if (result.state_trace.length > 0) {
+            result.state_trace += ">";
+        }
+        result.state_trace += state;
+    }
+
+    _runStageWithRetry(runId, bus, command, field, target, actionResult, onDone) {
+        let attempt = 0;
+
+        let tryOnce = () => {
+            if (runId !== this._applyRunId) return;
+            attempt += 1;
+            actionResult.attempts = attempt;
+
+            this._runHelperJson([command, String(bus), String(target)], (payload) => {
+                if (runId !== this._applyRunId) return;
+
+                if (payload && payload[field] !== undefined && payload[field] !== null) {
+                    let value = Number(payload[field]);
+                    if (!isNaN(value)) {
+                        actionResult.value = value;
+                    }
+                }
+
+                actionResult.ok = payload && payload.ok === true && actionResult.value === target;
+                if (actionResult.ok) {
+                    onDone(true);
+                    return;
+                }
+
+                if (attempt < MAX_RETRIES) {
+                    this._retryTimeoutId = Mainloop.timeout_add(RETRY_DELAY_MS, () => {
+                        this._retryTimeoutId = 0;
+                        tryOnce();
+                        return GLib.SOURCE_REMOVE;
+                    });
+                } else {
+                    onDone(false);
+                }
+            });
+        };
+
+        tryOnce();
+    }
+
+    _runHelperJson(args, callback) {
+        this._runHelper(args, (output) => {
+            if (!output) {
+                callback(null);
+                return;
+            }
+            try {
+                callback(JSON.parse(output));
+            } catch (e) {
+                global.logError("easy-brightness: invalid helper JSON: " + e.message);
+                callback(null);
             }
         });
     }
@@ -232,7 +427,7 @@ class EasyBrightnessApplet extends Applet.IconApplet {
     }
 
     _updateTooltip() {
-        let [brightness, blue] = this._getModeValues();
+        let [brightness, contrast, blue] = this._getModeValues();
         let mode = this.currentMode || "day";
         let modeLabel = _("Day");
         if (mode === "night") {
@@ -241,13 +436,16 @@ class EasyBrightnessApplet extends Applet.IconApplet {
             modeLabel = _("Custom");
         }
 
-        this.set_applet_tooltip(_("%s | Brightness: %d%% | Blue: %d%%").format(modeLabel, brightness, blue));
+        this.set_applet_tooltip(
+            _("%s | Brightness: %d%% | Contrast: %d%% | Blue: %d%%")
+                .format(modeLabel, brightness, contrast, blue)
+        );
     }
 
     _runHelper(args, callback) {
         try {
             let argv = [this._helperPath].concat(args);
-            let [success, pid, stdinFd, stdoutFd, stderrFd] = GLib.spawn_async_with_pipes(
+            let [, pid, stdinFd, stdoutFd, stderrFd] = GLib.spawn_async_with_pipes(
                 null, argv, null,
                 GLib.SpawnFlags.DO_NOT_REAP_CHILD | GLib.SpawnFlags.SEARCH_PATH,
                 null
@@ -266,7 +464,7 @@ class EasyBrightnessApplet extends Applet.IconApplet {
             GLib.child_watch_add(GLib.PRIORITY_DEFAULT, pid, (pid, status) => {
                 let output = "";
                 try {
-                    let [line, length] = stdoutStream.read_line_utf8(null);
+                    let [line] = stdoutStream.read_line_utf8(null);
                     if (line) output = line;
                     stdoutStream.close(null);
                 } catch (e) {}

@@ -1,6 +1,6 @@
 # Easy Brightness
 
-Easy Brightness is a Cinnamon applet for fast DDC/CI control of external monitor brightness and blue gain.
+Easy Brightness is a Cinnamon applet for fast DDC/CI control of external monitor brightness, contrast, and blue gain.
 
 The applet provides three modes from the panel icon:
 - Day profile
@@ -10,9 +10,10 @@ The applet provides three modes from the panel icon:
 ## Features
 
 - One-click day/night switch from the Cinnamon panel
-- Custom brightness and blue gain sliders in applet menu
+- Day/night presets for brightness, contrast, and blue gain
+- Custom brightness, contrast, and blue gain sliders in applet menu
 - Multi-monitor support through `libddcutil`
-- Retry logic for unstable DDC/CI writes
+- Applet-driven per-display state machine apply pipeline with step retries
 - Translation-ready UI with Cinnamon `po/` structure
 
 ## Runtime Requirements
