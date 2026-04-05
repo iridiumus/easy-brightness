@@ -18,6 +18,7 @@ make release-check
 
 4. Ensure `dist/*.deb` is generated successfully.
 5. Confirm docs sync for user-facing behavior/config changes (`README.md`, `ARCHITECTURE.md`, `DEVELOPMENT.md`, `CHANGELOG.md`).
+6. Verify the release version in `metadata.json` matches the top changelog entry.
 
 ## Tag and Publish
 

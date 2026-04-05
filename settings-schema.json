@@ -10,12 +10,12 @@
         "section-day": {
             "type": "section",
             "title": "Day",
-            "keys": ["day-brightness", "day-contrast", "day-blue"]
+            "keys": ["day-brightness", "day-contrast"]
         },
         "section-night": {
             "type": "section",
             "title": "Night",
-            "keys": ["night-brightness", "night-contrast", "night-blue"]
+            "keys": ["night-brightness", "night-contrast"]
         },
         "section-advanced": {
             "type": "section",
@@ -39,13 +39,9 @@
         "step": 1,
         "description": "Contrast"
     },
-    "day-blue": {
-        "type": "scale",
-        "default": 100,
-        "min": 0,
-        "max": 100,
-        "step": 1,
-        "description": "Blue"
+    "legacy-day-compat": {
+        "type": "generic",
+        "default": 100
     },
     "night-brightness": {
         "type": "scale",
@@ -63,13 +59,9 @@
         "step": 1,
         "description": "Contrast"
     },
-    "night-blue": {
-        "type": "scale",
-        "default": 0,
-        "min": 0,
-        "max": 100,
-        "step": 1,
-        "description": "Blue"
+    "legacy-night-compat": {
+        "type": "generic",
+        "default": 0
     },
     "mode-debounce": {
         "type": "spinbutton",
@@ -92,7 +84,11 @@
         "type": "generic",
         "default": 50
     },
-    "custom-blue": {
+    "volume-level": {
+        "type": "generic",
+        "default": 50
+    },
+    "legacy-custom-compat": {
         "type": "generic",
         "default": 50
     }

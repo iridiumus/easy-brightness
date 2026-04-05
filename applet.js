@@ -17,16 +17,29 @@ const ICON_DAY = "display-brightness-symbolic";
 const ICON_NIGHT = "weather-clear-night-symbolic";
 const ICON_CUSTOM = "night-light-symbolic";
 const ICON_BUSY = "content-loading-symbolic";
+const ICON_VOLUME = "audio-volume-high-symbolic";
 
 const MAX_RETRIES = 5;
 const RETRY_DELAY_MS = 2000;
-const DISPLAY_FSM_STATE = {
+const PROFILE_FSM_STATE = {
     INIT: "init",
     SET_BRIGHTNESS: "set_brightness",
     SET_CONTRAST: "set_contrast",
-    SET_BLUE: "set_blue",
+    SET_LEGACY: "set_legacy",
     DONE: "done",
     FAILED: "failed"
+};
+const VOLUME_FSM_STATE = {
+    INIT: "init",
+    SET_VOLUME: "set_volume",
+    SET_MUTE: "set_mute",
+    DONE: "done",
+    FAILED: "failed"
+};
+const DISPLAY_KIND = {
+    AUDIO: "audio",
+    LEGACY: "legacy",
+    GENERIC: "generic"
 };
 
 function _(str) {
@@ -80,20 +93,24 @@ class EasyBrightnessApplet extends Applet.IconApplet {
 
         this._helperPath = metadata.path + "/easy-brightness-helper";
         this._busy = false;
-        this._applyRunId = 0;
+        this._operationToken = 0;
+        this._activeOperation = null;
+        this._profilePending = false;
+        this._volumePending = false;
 
         // Settings
         this.settings = new Settings.AppletSettings(this, UUID, instanceId);
         this.settings.bind("day-brightness", "dayBrightness");
         this.settings.bind("day-contrast", "dayContrast");
-        this.settings.bind("day-blue", "dayBlue");
+        this.settings.bind("legacy-day-compat", "legacyDayCompat");
         this.settings.bind("night-brightness", "nightBrightness");
         this.settings.bind("night-contrast", "nightContrast");
-        this.settings.bind("night-blue", "nightBlue");
+        this.settings.bind("legacy-night-compat", "legacyNightCompat");
         this.settings.bind("current-mode", "currentMode");
         this.settings.bind("custom-brightness", "customBrightness");
         this.settings.bind("custom-contrast", "customContrast");
-        this.settings.bind("custom-blue", "customBlue");
+        this.settings.bind("legacy-custom-compat", "legacyCustomCompat");
+        this.settings.bind("volume-level", "volumeLevel");
         this.settings.bind("mode-debounce", "modeDebounce");
 
         // Custom mode sliders in context menu
@@ -105,9 +122,9 @@ class EasyBrightnessApplet extends Applet.IconApplet {
             "preferences-desktop-display-symbolic", _("Contrast"),
             (pct) => this._onCustomSliderChanged("contrast", pct)
         );
-        this._blueSlider = new ControlSlider(
-            "color-select-symbolic", _("Blue"),
-            (pct) => this._onCustomSliderChanged("blue", pct)
+        this._volumeSlider = new ControlSlider(
+            ICON_VOLUME, _("Volume"),
+            (pct) => this._onCustomSliderChanged("volume", pct)
         );
 
         let savedBrightness = this.customBrightness;
@@ -118,19 +135,20 @@ class EasyBrightnessApplet extends Applet.IconApplet {
         if (savedContrast === undefined || savedContrast === null) savedContrast = 50;
         this._contrastSlider.setValue(savedContrast / 100.0);
 
-        let savedBlue = this.customBlue;
-        if (savedBlue === undefined || savedBlue === null) savedBlue = 50;
-        this._blueSlider.setValue(savedBlue / 100.0);
+        let savedVolume = this.volumeLevel;
+        if (savedVolume === undefined || savedVolume === null) savedVolume = 50;
+        this._volumeSlider.setValue(savedVolume / 100.0);
 
         this._applet_context_menu.addMenuItem(this._brightnessSlider, 0);
         this._applet_context_menu.addMenuItem(this._contrastSlider, 1);
-        this._applet_context_menu.addMenuItem(this._blueSlider, 2);
+        this._applet_context_menu.addMenuItem(this._volumeSlider, 2);
         this._applet_context_menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem(), 3);
 
         // Apply saved mode on startup
         this._updateIcon();
         this._updateTooltip();
-        this._applyMode();
+        this._scheduleProfileApply();
+        this._scheduleVolumeApply();
     }
 
     _bindTranslations() {
@@ -147,8 +165,6 @@ class EasyBrightnessApplet extends Applet.IconApplet {
     }
 
     on_applet_clicked() {
-        if (this._busy) return;
-
         if (this.currentMode === "day") {
             this.currentMode = "night";
         } else {
@@ -157,62 +173,108 @@ class EasyBrightnessApplet extends Applet.IconApplet {
         this._updateIcon();
         this._updateTooltip();
 
+        this._queueProfileApply(true);
+    }
+
+    on_applet_removed_from_panel() {
+        this._operationToken += 1;
         if (this._modeTimeoutId) {
             Mainloop.source_remove(this._modeTimeoutId);
             this._modeTimeoutId = 0;
         }
-        let delay = this.modeDebounce || 750;
-        this._modeTimeoutId = Mainloop.timeout_add(delay, () => {
-            this._modeTimeoutId = 0;
-            this._applyMode();
-            return GLib.SOURCE_REMOVE;
-        });
-    }
-
-    on_applet_removed_from_panel() {
-        this._applyRunId += 1;
-        if (this._modeTimeoutId) {
-            Mainloop.source_remove(this._modeTimeoutId);
-            this._modeTimeoutId = 0;
+        if (this._volumeTimeoutId) {
+            Mainloop.source_remove(this._volumeTimeoutId);
+            this._volumeTimeoutId = 0;
         }
         if (this._retryTimeoutId) {
             Mainloop.source_remove(this._retryTimeoutId);
             this._retryTimeoutId = 0;
         }
+        this._activeOperation = null;
+        this._profilePending = false;
+        this._volumePending = false;
         this._busy = false;
     }
 
     _onCustomSliderChanged(which, pct) {
-        if (this._busy) return;
-
         if (which === "brightness") {
             this.customBrightness = pct;
         } else if (which === "contrast") {
             this.customContrast = pct;
+            this.currentMode = "custom";
+            this._updateTooltip();
+            this._queueProfileApply();
+            return;
+        } else if (which === "volume") {
+            this.volumeLevel = pct;
+            this._updateTooltip();
+            this._queueVolumeApply();
+            return;
         } else {
-            this.customBlue = pct;
+            this.legacyCustomCompat = pct;
         }
         this.currentMode = "custom";
         this._updateTooltip();
-        this._applyMode();
+        this._queueProfileApply();
     }
 
     _getModeValues() {
         if (this.currentMode === "night") {
-            return [this.nightBrightness, this.nightContrast, this.nightBlue];
+            return [this.nightBrightness, this.nightContrast, this.volumeLevel];
         } else if (this.currentMode === "custom") {
-            return [this.customBrightness, this.customContrast, this.customBlue];
+            return [this.customBrightness, this.customContrast, this.volumeLevel];
         }
-        return [this.dayBrightness, this.dayContrast, this.dayBlue];
+        return [this.dayBrightness, this.dayContrast, this.volumeLevel];
     }
 
-    _applyMode() {
-        if (this._busy) return;
+    _scheduleProfileApply() {
+        this._queueProfileApply(false);
+    }
 
-        let [brightness, contrast, blue] = this._getModeValues();
-        let targets = { brightness, contrast, blue };
-        let runId = ++this._applyRunId;
+    _scheduleVolumeApply() {
+        this._queueVolumeApply();
+    }
 
+    _queueProfileApply(immediate = false) {
+        this._profilePending = true;
+        if (immediate) {
+            if (this._modeTimeoutId) {
+                Mainloop.source_remove(this._modeTimeoutId);
+                this._modeTimeoutId = 0;
+            }
+            this._modeTimeoutId = Mainloop.timeout_add(this.modeDebounce || 750, () => {
+                this._modeTimeoutId = 0;
+                this._pumpOperationQueue();
+                return GLib.SOURCE_REMOVE;
+            });
+            return;
+        }
+        this._pumpOperationQueue();
+    }
+
+    _queueVolumeApply() {
+        this._volumePending = true;
+        this._pumpOperationQueue();
+    }
+
+    _pumpOperationQueue() {
+        if (this._activeOperation) return;
+
+        if (this._profilePending) {
+            this._profilePending = false;
+            this._startOperation("profile");
+            return;
+        }
+
+        if (this._volumePending) {
+            this._volumePending = false;
+            this._startOperation("volume");
+        }
+    }
+
+    _startOperation(kind) {
+        let token = ++this._operationToken;
+        this._activeOperation = { kind, token };
         this._busy = true;
         this.set_applet_icon_symbolic_name(ICON_BUSY);
         this.set_applet_tooltip(_("Applying settings..."));
@@ -222,28 +284,206 @@ class EasyBrightnessApplet extends Applet.IconApplet {
             this._retryTimeoutId = 0;
         }
 
-        this._applyTargetsWithStateMachine(runId, targets, (allOk) => {
-            if (runId !== this._applyRunId) return;
-            if (!allOk) {
-                global.logError("easy-brightness: apply state machine finished with failures");
-            }
-            this._busy = false;
-            this._updateIcon();
-            this._updateTooltip();
-        });
+        if (kind === "profile") {
+            this._startProfileOperation(token);
+        } else {
+            this._startVolumeOperation(token);
+        }
     }
 
-    _applyTargetsWithStateMachine(runId, targets, onDone) {
-        this._runHelperJson(["detect"], (displays) => {
-            if (runId !== this._applyRunId) return;
+    _finishOperation(kind, token, ok) {
+        if (!this._activeOperation || this._activeOperation.token !== token || this._activeOperation.kind !== kind) {
+            return;
+        }
+        if (!ok) {
+            global.logError("easy-brightness: operation failed: " + kind);
+        }
+        this._activeOperation = null;
+        this._busy = false;
+        this._updateIcon();
+        this._updateTooltip();
+        this._pumpOperationQueue();
+    }
 
-            if (!Array.isArray(displays)) {
-                onDone(false);
+    _displayKind(display) {
+        if (display && display.kind) {
+            return String(display.kind);
+        }
+        if (display && display.supports_volume) {
+            return DISPLAY_KIND.AUDIO;
+        }
+        if (display && display.supports_legacy) {
+            return DISPLAY_KIND.LEGACY;
+        }
+        return DISPLAY_KIND.GENERIC;
+    }
+
+    _buildProfileStages(display) {
+        let kind = this._displayKind(display);
+        let brightness = this._getModeBrightness();
+
+        if (kind === DISPLAY_KIND.AUDIO) {
+            return [
+                {
+                    state: PROFILE_FSM_STATE.SET_BRIGHTNESS,
+                    command: "set-bus",
+                    field: "brightness",
+                    target: brightness
+                },
+                {
+                    state: PROFILE_FSM_STATE.SET_CONTRAST,
+                    command: "set-contrast-bus",
+                    field: "contrast",
+                    target: this._getModeContrast()
+                }
+            ];
+        }
+
+        if (display && display.supports_contrast && !display.supports_legacy) {
+            return [
+                {
+                    state: PROFILE_FSM_STATE.SET_BRIGHTNESS,
+                    command: "set-bus",
+                    field: "brightness",
+                    target: brightness
+                },
+                {
+                    state: PROFILE_FSM_STATE.SET_CONTRAST,
+                    command: "set-contrast-bus",
+                    field: "contrast",
+                    target: this._getModeContrast()
+                }
+            ];
+        }
+
+        return [
+            {
+                state: PROFILE_FSM_STATE.SET_BRIGHTNESS,
+                command: "set-bus",
+                field: "brightness",
+                target: brightness
+            },
+            {
+                state: PROFILE_FSM_STATE.SET_LEGACY,
+                command: "set-legacy-bus",
+                field: "legacy",
+                target: this._getLegacyCompat()
+            }
+        ];
+    }
+
+    _buildVolumeStages(display, target) {
+        let supportsMute = !display || display.supports_mute !== false;
+        if (target <= 0) {
+            let stages = [
+                {
+                    state: VOLUME_FSM_STATE.SET_VOLUME,
+                    command: "set-volume-bus",
+                    field: "volume",
+                    target: 0
+                }
+            ];
+            if (supportsMute) {
+                stages.push({
+                    state: VOLUME_FSM_STATE.SET_MUTE,
+                    command: "set-mute-bus",
+                    field: "mute",
+                    target: 1
+                });
+            }
+            return stages;
+        }
+
+        let stages = [
+            {
+                state: VOLUME_FSM_STATE.SET_VOLUME,
+                command: "set-volume-bus",
+                field: "volume",
+                target: target
+            }
+        ];
+        if (supportsMute) {
+            stages.push({
+                state: VOLUME_FSM_STATE.SET_MUTE,
+                command: "set-mute-bus",
+                field: "mute",
+                target: 0
+            });
+        }
+        return stages;
+    }
+
+    _getModeBrightness() {
+        if (this.currentMode === "night") {
+            return this.nightBrightness;
+        } else if (this.currentMode === "custom") {
+            return this.customBrightness;
+        }
+        return this.dayBrightness;
+    }
+
+    _getModeContrast() {
+        if (this.currentMode === "night") {
+            return this.nightContrast;
+        } else if (this.currentMode === "custom") {
+            return this.customContrast;
+        }
+        return this.dayContrast;
+    }
+
+    _getLegacyCompat() {
+        if (this.currentMode === "night") {
+            return this.legacyNightCompat;
+        } else if (this.currentMode === "custom") {
+            return this.legacyCustomCompat;
+        }
+        return this.legacyDayCompat;
+    }
+
+    _startProfileOperation(token) {
+        this._runHelperJson(["detect"], (displays) => {
+            if (!this._isCurrentOperation("profile", token)) return;
+            if (!Array.isArray(displays) || displays.length === 0) {
+                this._finishOperation("profile", token, true);
                 return;
             }
 
-            if (displays.length === 0) {
-                onDone(true);
+            let index = 0;
+            let allOk = true;
+            let runNext = () => {
+                if (!this._isCurrentOperation("profile", token)) return;
+                if (index >= displays.length) {
+                    this._finishOperation("profile", token, allOk);
+                    return;
+                }
+
+                let display = displays[index];
+                this._runDisplayStages(token, display, this._buildProfileStages(display), (ok) => {
+                    if (!this._isCurrentOperation("profile", token)) return;
+                    if (!ok) {
+                        allOk = false;
+                        global.logError("easy-brightness: profile apply failed: " + JSON.stringify(display));
+                    }
+                    index += 1;
+                    runNext();
+                });
+            };
+            runNext();
+        });
+    }
+
+    _startVolumeOperation(token) {
+        this._runHelperJson(["detect"], (displays) => {
+            if (!this._isCurrentOperation("volume", token)) return;
+            if (!Array.isArray(displays) || displays.length === 0) {
+                this._finishOperation("volume", token, true);
+                return;
+            }
+
+            let target = this.volumeLevel || 0;
+            let audioDisplays = displays.filter((display) => this._displayKind(display) === DISPLAY_KIND.AUDIO);
+            if (audioDisplays.length === 0) {
+                this._finishOperation("volume", token, true);
                 return;
             }
 
@@ -251,137 +491,71 @@ class EasyBrightnessApplet extends Applet.IconApplet {
             let allOk = true;
 
             let runNext = () => {
-                if (runId !== this._applyRunId) return;
-                if (index >= displays.length) {
-                    onDone(allOk);
+                if (!this._isCurrentOperation("volume", token)) return;
+                if (index >= audioDisplays.length) {
+                    this._finishOperation("volume", token, allOk);
                     return;
                 }
 
-                this._runDisplayStateMachine(runId, displays[index], targets, (result) => {
-                    if (runId !== this._applyRunId) return;
-                    if (!result.ok) {
+                let display = audioDisplays[index];
+                this._runDisplayStages(token, display, this._buildVolumeStages(display, target), (ok) => {
+                    if (!this._isCurrentOperation("volume", token)) return;
+                    if (!ok) {
                         allOk = false;
-                        global.logError("easy-brightness: display apply failed: " + JSON.stringify(result));
+                        global.logError("easy-brightness: volume apply failed: " + JSON.stringify(display));
                     }
                     index += 1;
                     runNext();
                 });
             };
-
             runNext();
         });
     }
 
-    _runDisplayStateMachine(runId, display, targets, onDone) {
+    _runDisplayStages(token, display, stages, onDone) {
         let bus = Number(display.bus);
         let serial = display && display.serial ? String(display.serial) : "";
-        let result = {
-            bus,
-            serial,
-            ok: false,
-            state: DISPLAY_FSM_STATE.INIT,
-            failed_step: "",
-            state_trace: "",
-            brightness: this._makeActionResult(targets.brightness),
-            contrast: this._makeActionResult(targets.contrast),
-            blue: this._makeActionResult(targets.blue)
-        };
 
-        this._appendStateTrace(result, DISPLAY_FSM_STATE.INIT);
-
-        let stages = [
-            {
-                state: DISPLAY_FSM_STATE.SET_BRIGHTNESS,
-                command: "set-bus",
-                field: "brightness",
-                target: targets.brightness
-            },
-            {
-                state: DISPLAY_FSM_STATE.SET_CONTRAST,
-                command: "set-contrast-bus",
-                field: "contrast",
-                target: targets.contrast
-            },
-            {
-                state: DISPLAY_FSM_STATE.SET_BLUE,
-                command: "set-blue-bus",
-                field: "blue",
-                target: targets.blue
-            }
-        ];
-
-        let stageIndex = 0;
+        let runStageIndex = 0;
         let runStage = () => {
-            if (runId !== this._applyRunId) return;
+            if (!this._isOperationTokenActive(token)) return;
 
-            if (stageIndex >= stages.length) {
-                result.state = DISPLAY_FSM_STATE.DONE;
-                result.ok = true;
-                this._appendStateTrace(result, DISPLAY_FSM_STATE.DONE);
-                onDone(result);
+            if (runStageIndex >= stages.length) {
+                onDone(true);
                 return;
             }
 
-            let stage = stages[stageIndex];
-            result.state = stage.state;
-            this._appendStateTrace(result, stage.state);
-
-            this._runStageWithRetry(
-                runId, bus, stage.command, stage.field, stage.target, result[stage.field],
-                (ok) => {
-                    if (runId !== this._applyRunId) return;
-                    if (!ok) {
-                        result.state = DISPLAY_FSM_STATE.FAILED;
-                        result.failed_step = stage.field;
-                        this._appendStateTrace(result, DISPLAY_FSM_STATE.FAILED);
-                        onDone(result);
-                        return;
-                    }
-                    stageIndex += 1;
-                    runStage();
+            let stage = stages[runStageIndex];
+            this._runStageWithRetry(token, bus, serial, stage, (ok) => {
+                if (!this._isOperationTokenActive(token)) return;
+                if (!ok) {
+                    onDone(false);
+                    return;
                 }
-            );
+                runStageIndex += 1;
+                runStage();
+            });
         };
 
         runStage();
     }
 
-    _makeActionResult(target) {
-        return {
-            target,
-            value: -1,
-            attempts: 0,
-            ok: false
-        };
-    }
-
-    _appendStateTrace(result, state) {
-        if (result.state_trace.length > 0) {
-            result.state_trace += ">";
-        }
-        result.state_trace += state;
-    }
-
-    _runStageWithRetry(runId, bus, command, field, target, actionResult, onDone) {
+    _runStageWithRetry(token, bus, serial, stage, onDone) {
         let attempt = 0;
-
         let tryOnce = () => {
-            if (runId !== this._applyRunId) return;
+            if (!this._isOperationTokenActive(token)) return;
             attempt += 1;
-            actionResult.attempts = attempt;
 
-            this._runHelperJson([command, String(bus), String(target)], (payload) => {
-                if (runId !== this._applyRunId) return;
+            this._runHelperJson([stage.command, String(bus), String(stage.target)], (payload) => {
+                if (!this._isOperationTokenActive(token)) return;
 
-                if (payload && payload[field] !== undefined && payload[field] !== null) {
-                    let value = Number(payload[field]);
-                    if (!isNaN(value)) {
-                        actionResult.value = value;
-                    }
+                let ok = payload && payload.ok === true;
+                let value = ok && payload[stage.field] !== undefined ? Number(payload[stage.field]) : -1;
+                if (ok && !isNaN(value) && value !== stage.target) {
+                    ok = false;
                 }
 
-                actionResult.ok = payload && payload.ok === true && actionResult.value === target;
-                if (actionResult.ok) {
+                if (ok) {
                     onDone(true);
                     return;
                 }
@@ -392,9 +566,11 @@ class EasyBrightnessApplet extends Applet.IconApplet {
                         tryOnce();
                         return GLib.SOURCE_REMOVE;
                     });
-                } else {
-                    onDone(false);
+                    return;
                 }
+
+                global.logError("easy-brightness: stage failed on bus " + bus + " serial " + serial + " command " + stage.command);
+                onDone(false);
             });
         };
 
@@ -416,6 +592,14 @@ class EasyBrightnessApplet extends Applet.IconApplet {
         });
     }
 
+    _isOperationTokenActive(token) {
+        return this._activeOperation && this._activeOperation.token === token;
+    }
+
+    _isCurrentOperation(kind, token) {
+        return this._isOperationTokenActive(token) && this._activeOperation.kind === kind;
+    }
+
     _updateIcon() {
         if (this.currentMode === "night") {
             this.set_applet_icon_symbolic_name(ICON_NIGHT);
@@ -427,7 +611,7 @@ class EasyBrightnessApplet extends Applet.IconApplet {
     }
 
     _updateTooltip() {
-        let [brightness, contrast, blue] = this._getModeValues();
+        let [brightness, contrast, volume] = this._getModeValues();
         let mode = this.currentMode || "day";
         let modeLabel = _("Day");
         if (mode === "night") {
@@ -437,8 +621,8 @@ class EasyBrightnessApplet extends Applet.IconApplet {
         }
 
         this.set_applet_tooltip(
-            _("%s | Brightness: %d%% | Contrast: %d%% | Blue: %d%%")
-                .format(modeLabel, brightness, contrast, blue)
+            _("%s | Brightness: %d%% | Contrast: %d%% | Volume: %d%%")
+                .format(modeLabel, brightness, contrast, volume)
         );
     }
 

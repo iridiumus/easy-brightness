@@ -18,7 +18,7 @@ msgstr ""
 msgid "Easy Brightness"
 msgstr "Простая яркость"
 
-msgid "DDC/CI brightness and blue gain control for external monitors"
+msgid "DDC/CI brightness, contrast, and volume control for external monitors"
 msgstr "Управление яркостью и синим каналом внешних мониторов через DDC/CI"
 
 msgid "Switch instantly between Day, Night, and Custom monitor profiles from the Cinnamon panel."
@@ -42,7 +42,7 @@ msgstr "Дополнительно"
 msgid "Brightness"
 msgstr "Яркость"
 
-msgid "Blue"
+msgid "Volume"
 msgstr "Синий"
 
 msgid "Delay before applying mode switch"
@@ -60,5 +60,5 @@ msgstr "Применение настроек..."
 msgid "Custom"
 msgstr "Пользовательский"
 
-msgid "%s | Brightness: %d%% | Blue: %d%%"
+msgid "%s | Brightness: %d%% | Contrast: %d%% | Volume: %d%%"
 msgstr "%s | Яркость: %d%% | Синий: %d%%"

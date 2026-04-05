@@ -1,17 +1,17 @@
 #!/bin/bash
-# Test script: read and set blue video gain (VCP 0x1A) on all monitors
+# Test script: read and set legacy compatibility channel (VCP 0x1A) on all monitors
 # Usage:
-#   ./test_blue.sh              - read blue gain from all monitors
-#   ./test_blue.sh set <value>  - set blue gain (0-100) on all monitors
+#   ./test_legacy.sh              - read legacy channel from all monitors
+#   ./test_legacy.sh set <value>  - set legacy channel (0-100) on all monitors
 
-VCP_BLUE=0x1a
+VCP_LEGACY_COMPAT=0x1a
 MAX_RETRIES=5
 RETRY_DELAY=2
 
-read_blue() {
+read_legacy() {
 	local bus="$1"
 	local result
-	result=$(ddcutil --bus "$bus" getvcp $VCP_BLUE 2>&1)
+	result=$(ddcutil --bus "$bus" getvcp $VCP_LEGACY_COMPAT 2>&1)
 	if [[ "$result" =~ current\ value\ =\ +([0-9]+) ]]; then
 		echo "${BASH_REMATCH[1]}"
 	else
@@ -40,7 +40,7 @@ echo "Found ${#monitors[@]} monitor(s)"
 
 if [ "$1" = "set" ] && [ -n "$2" ]; then
 	TARGET="$2"
-	echo "=== Setting blue gain to $TARGET on all monitors ==="
+		echo "=== Setting legacy channel to $TARGET on all monitors ==="
 	for m in "${monitors[@]}"; do
 		bus="${m%%:*}"
 		serial="${m##*:}"
@@ -48,8 +48,8 @@ if [ "$1" = "set" ] && [ -n "$2" ]; then
 		echo "Monitor $serial (bus $bus):"
 
 		for ((attempt = 1; attempt <= MAX_RETRIES; attempt++)); do
-			current=$(read_blue "$bus")
-			echo "  Attempt $attempt: current blue = $current"
+			current=$(read_legacy "$bus")
+			echo "  Attempt $attempt: current legacy value = $current"
 
 			if [ "$current" -eq "$TARGET" ]; then
 				echo "  OK: already at target"
@@ -57,11 +57,11 @@ if [ "$1" = "set" ] && [ -n "$2" ]; then
 			fi
 
 			echo "  Setting to $TARGET..."
-			ddcutil --bus "$bus" setvcp $VCP_BLUE "$TARGET" 2>&1
+			ddcutil --bus "$bus" setvcp $VCP_LEGACY_COMPAT "$TARGET" 2>&1
 			sleep "$RETRY_DELAY"
 
-			actual=$(read_blue "$bus")
-			echo "  After set: blue = $actual"
+			actual=$(read_legacy "$bus")
+			echo "  After set: legacy value = $actual"
 
 			if [ "$actual" -eq "$TARGET" ]; then
 				echo "  OK"
@@ -72,12 +72,12 @@ if [ "$1" = "set" ] && [ -n "$2" ]; then
 		done
 	done
 else
-	echo "=== Reading blue gain (VCP $VCP_BLUE) ==="
+	echo "=== Reading legacy channel (VCP $VCP_LEGACY_COMPAT) ==="
 	for m in "${monitors[@]}"; do
 		bus="${m%%:*}"
 		serial="${m##*:}"
-		current=$(read_blue "$bus")
-		echo "  Monitor $serial (bus $bus): blue = $current"
+		current=$(read_legacy "$bus")
+		echo "  Monitor $serial (bus $bus): legacy value = $current"
 	done
 	echo ""
 	echo "To set: $0 set <0-100>"

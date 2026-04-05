@@ -12,8 +12,12 @@
  *   set-bus <bus> <value>         - set brightness for one display
  *   get-contrast-bus <bus>        - read contrast for one display
  *   set-contrast-bus <bus> <val>  - set contrast for one display
- *   get-blue-bus <bus>            - read blue gain for one display
- *   set-blue-bus <bus> <value>    - set blue gain for one display
+ *   get-legacy-bus <bus>          - read legacy compatibility channel for one
+ * display set-legacy-bus <bus> <value>  - set legacy compatibility channel for
+ * one display get-volume-bus <bus>          - read audio volume for one display
+ *   set-volume-bus <bus> <value>  - set audio volume for one display
+ *   get-mute-bus <bus>            - read audio mute for one display
+ *   set-mute-bus <bus> <value>    - set audio mute for one display
  */
 
 #define _DEFAULT_SOURCE
@@ -25,7 +29,9 @@
 
 #define VCP_BRIGHTNESS 0x10
 #define VCP_CONTRAST 0x12
-#define VCP_BLUE_GAIN 0x1A
+#define VCP_LEGACY_COMPAT 0x1A
+#define VCP_AUDIO_VOLUME 0x62
+#define VCP_AUDIO_MUTE 0x8D
 
 static void init_ddcutil(void) {
   ddca_set_fout(NULL);
@@ -49,6 +55,13 @@ static int read_vcp(DDCA_Display_Handle dh, uint8_t code) {
   return (valrec.sh << 8) | valrec.sl;
 }
 
+static int probe_vcp(DDCA_Display_Handle dh, uint8_t code, int *value) {
+  int read = read_vcp(dh, code);
+  if (value != NULL)
+    *value = read;
+  return read >= 0;
+}
+
 static const DDCA_Display_Info *
 find_display_by_bus(const DDCA_Display_Info_List *dlist, int bus) {
   for (int i = 0; i < dlist->ct; i++) {
@@ -57,6 +70,14 @@ find_display_by_bus(const DDCA_Display_Info_List *dlist, int bus) {
       return di;
   }
   return NULL;
+}
+
+static void print_json_string(const char *key, const char *value) {
+  printf("\"%s\":\"%s\"", key, safe_str(value));
+}
+
+static void print_json_bool(const char *key, int value) {
+  printf("\"%s\":%s", key, value ? "true" : "false");
 }
 
 static int cmd_detect(void) {
@@ -68,11 +89,48 @@ static int cmd_detect(void) {
   printf("[");
   for (int i = 0; i < dlist->ct; i++) {
     const DDCA_Display_Info *di = &dlist->info[i];
+    DDCA_Display_Handle dh = NULL;
+    int supports_brightness = 0;
+    int supports_contrast = 0;
+    int supports_legacy = 0;
+    int supports_volume = 0;
+    int supports_mute = 0;
+    int kind = 0;
+
+    rc = ddca_open_display2(di->dref, true, &dh);
+    if (rc == 0) {
+      supports_brightness = probe_vcp(dh, VCP_BRIGHTNESS, NULL);
+      supports_contrast = probe_vcp(dh, VCP_CONTRAST, NULL);
+      supports_legacy = probe_vcp(dh, VCP_LEGACY_COMPAT, NULL);
+      supports_volume = probe_vcp(dh, VCP_AUDIO_VOLUME, NULL);
+      supports_mute = probe_vcp(dh, VCP_AUDIO_MUTE, NULL);
+      ddca_close_display(dh);
+      if (supports_volume) {
+        kind = 1;
+      } else if (supports_legacy) {
+        kind = 2;
+      }
+    }
+
     if (i > 0)
       printf(",");
-    printf("{\"bus\":%d,\"serial\":\"%s\",\"model\":\"%s\",\"dispno\":%d}",
+    printf("{\"bus\":%d,\"serial\":\"%s\",\"model\":\"%s\",\"dispno\":%d,",
            di->path.path.i2c_busno, safe_str(di->sn), safe_str(di->model_name),
            di->dispno);
+    print_json_string("kind", kind == 1   ? "audio"
+                              : kind == 2 ? "legacy"
+                                          : "generic");
+    printf(",");
+    print_json_bool("supports_brightness", supports_brightness);
+    printf(",");
+    print_json_bool("supports_contrast", supports_contrast);
+    printf(",");
+    print_json_bool("supports_legacy", supports_legacy);
+    printf(",");
+    print_json_bool("supports_volume", supports_volume);
+    printf(",");
+    print_json_bool("supports_mute", supports_mute);
+    printf("}");
   }
   printf("]\n");
 
@@ -175,8 +233,8 @@ int main(int argc, char *argv[]) {
   if (argc < 2) {
     fprintf(stderr, "Usage: easy-brightness-helper "
                     "<detect|get-bus|set-bus|get-contrast-bus|set-contrast-bus|"
-                    "get-blue-bus|"
-                    "set-blue-bus> [args]\n");
+                    "get-legacy-bus|set-legacy-bus|get-volume-bus|"
+                    "set-volume-bus|get-mute-bus|set-mute-bus> [args]\n");
     return 1;
   }
 
@@ -215,18 +273,52 @@ int main(int argc, char *argv[]) {
     return bus < 0 || v < 0 ? 1 : cmd_set_bus(VCP_CONTRAST, "contrast", bus, v);
   }
 
-  if (strcmp(argv[1], "get-blue-bus") == 0) {
+  if (strcmp(argv[1], "get-legacy-bus") == 0) {
     if (argc < 3)
       return 1;
     int bus = parse_bus(argv[2]);
-    return bus < 0 ? 1 : cmd_get_bus(VCP_BLUE_GAIN, "blue", bus);
+    return bus < 0 ? 1 : cmd_get_bus(VCP_LEGACY_COMPAT, "legacy", bus);
   }
-  if (strcmp(argv[1], "set-blue-bus") == 0) {
+  if (strcmp(argv[1], "set-legacy-bus") == 0) {
     if (argc < 4)
       return 1;
     int bus = parse_bus(argv[2]);
     int v = parse_value(argv[3]);
-    return bus < 0 || v < 0 ? 1 : cmd_set_bus(VCP_BLUE_GAIN, "blue", bus, v);
+    return bus < 0 || v < 0 ? 1
+                            : cmd_set_bus(VCP_LEGACY_COMPAT, "legacy", bus, v);
+  }
+
+  if (strcmp(argv[1], "get-volume-bus") == 0) {
+    if (argc < 3)
+      return 1;
+    int bus = parse_bus(argv[2]);
+    return bus < 0 ? 1 : cmd_get_bus(VCP_AUDIO_VOLUME, "volume", bus);
+  }
+  if (strcmp(argv[1], "set-volume-bus") == 0) {
+    if (argc < 4)
+      return 1;
+    int bus = parse_bus(argv[2]);
+    int v = parse_value(argv[3]);
+    return bus < 0 || v < 0 ? 1
+                            : cmd_set_bus(VCP_AUDIO_VOLUME, "volume", bus, v);
+  }
+
+  if (strcmp(argv[1], "get-mute-bus") == 0) {
+    if (argc < 3)
+      return 1;
+    int bus = parse_bus(argv[2]);
+    return bus < 0 ? 1 : cmd_get_bus(VCP_AUDIO_MUTE, "mute", bus);
+  }
+  if (strcmp(argv[1], "set-mute-bus") == 0) {
+    if (argc < 4)
+      return 1;
+    int bus = parse_bus(argv[2]);
+    int v = parse_value(argv[3]);
+    if (bus < 0 || v < 0)
+      return 1;
+    if (v != 0 && v != 1)
+      return 1;
+    return cmd_set_bus(VCP_AUDIO_MUTE, "mute", bus, v);
   }
 
   return 1;

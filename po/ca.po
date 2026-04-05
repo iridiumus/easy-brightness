@@ -19,7 +19,7 @@ msgid "Easy Brightness"
 msgstr ""
 
 #. metadata.json->description
-msgid "DDC/CI brightness and blue gain control for external monitors"
+msgid "DDC/CI brightness, contrast, and volume control for external monitors"
 msgstr ""
 
 #. metadata.json->comments
@@ -56,10 +56,10 @@ msgstr ""
 msgid "Brightness"
 msgstr ""
 
-#. settings-schema.json->day-blue->description
-#. settings-schema.json->night-blue->description
+#. settings-schema.json->legacy-day-compat->description
+#. settings-schema.json->legacy-night-compat->description
 #: applet.js
-msgid "Blue"
+msgid "Volume"
 msgstr ""
 
 #. settings-schema.json->mode-debounce->description
@@ -83,5 +83,5 @@ msgid "Custom"
 msgstr ""
 
 #: applet.js
-msgid "%s | Brightness: %d%% | Blue: %d%%"
+msgid "%s | Brightness: %d%% | Contrast: %d%% | Volume: %d%%"
 msgstr ""
